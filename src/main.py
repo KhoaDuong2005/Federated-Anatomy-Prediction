@@ -7,7 +7,7 @@ import random
 import matplotlib.pyplot as plt
 
 
-def process_directory(directory: str, modality: str, body_part: str, is_validate: bool, size: tuple):
+def process_directory(directory: str, modality: str, body_part: str, is_anatomy: bool, is_validate: bool, size: tuple):
     images = []
     file_names = []
     metadata_list = []
@@ -24,7 +24,7 @@ def process_directory(directory: str, modality: str, body_part: str, is_validate
         except Exception as exception:
             print(f"Skipping file: {filename}: {exception}")
     if images:
-        save_images_to_mongodb(images, file_names, metadata_list, modality, body_part, is_validate)
+        save_images_to_mongodb(images, file_names, metadata_list, modality, body_part, is_anatomy, is_validate)
     else:
         print("No valid image found in the directory")
 
@@ -38,6 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--body", type=str, required=True, help="Specify the body part (chest, brain, abdomen, leg, ...)")
     parser.add_argument("--im", type=int, help="Specify number of image print of specific database in MongoDB")
     parser.add_argument("--size", type=str, default="256,256", help="Specify the size of image before saving to MongoDB (default = 256,256)")
+    parser.add_argument("--ana", type=str, default= None, help="Specify whether the images being saved have anatomy or not")
 
     args = parser.parse_args()
 
@@ -49,12 +50,14 @@ if __name__ == "__main__":
         if args.directory:
             target_size = args.size
             target_size = tuple(map(int, target_size.split(',')))
-            process_directory(args.directory, modality, body_part, is_validate, target_size)
+            is_anatomy = args.ana
+            process_directory(args.directory, modality, body_part, is_anatomy, is_validate, target_size)
             print(f"Files have been saved as {target_size}, if you want to change it, use --size x,y as a parameter (default is 256,256)")
 
         if args.im is not None:
+            is_anatomy = args.ana
             from store_and_retrieve import get_image_info
-            images_info = get_image_info(None, modality, body_part, is_validate)
+            images_info = get_image_info(None, modality, body_part, is_anatomy, is_validate)
             for i, image_info in enumerate(images_info):
                 print(image_info["image_array"].shape)
                 if i >= args.im:
