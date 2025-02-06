@@ -7,7 +7,7 @@ import random
 import matplotlib.pyplot as plt
 
 
-def process_directory(directory: str, modality: str, body_part: str, is_validate: bool):
+def process_directory(directory: str, modality: str, body_part: str, is_validate: bool, size: tuple):
     images = []
     file_names = []
     metadata_list = []
@@ -16,7 +16,7 @@ def process_directory(directory: str, modality: str, body_part: str, is_validate
         file_path = os.path.join(directory, filename)
 
         try:
-            images_array = load_medical_image(file_path)
+            images_array = load_medical_image(file_path, size)
             images.append(images_array)
             file_names.append(filename)
             metadata_list.append({"source": "dataset", "filename": filename})
@@ -37,6 +37,7 @@ if __name__ == "__main__":
     parser.add_argument("--mod", type=str, required=True, help="Specify the imaging modality (mri, ct, xray)")
     parser.add_argument("--body", type=str, required=True, help="Specify the body part (chest, brain, abdomen, leg, ...)")
     parser.add_argument("--im", type=int, help="Specify number of image print of specific database in MongoDB")
+    parser.add_argument("--size", type=str, default="256,256", help="Specify the size of image before saving to MongoDB (default = 256,256)")
 
     args = parser.parse_args()
 
@@ -46,12 +47,16 @@ if __name__ == "__main__":
         is_validate = args.val
 
         if args.directory:
-            process_directory(args.directory, modality, body_part, is_validate)
+            target_size = args.size
+            target_size = tuple(map(int, target_size.split(',')))
+            process_directory(args.directory, modality, body_part, is_validate, target_size)
+            print(f"Files have been saved as {target_size}, if you want to change it, use --size x,y as a parameter (default is 256,256)")
 
         if args.im is not None:
             from store_and_retrieve import get_image_info
             images_info = get_image_info(None, modality, body_part, is_validate)
             for i, image_info in enumerate(images_info):
+                print(image_info["image_array"].shape)
                 if i >= args.im:
                     break
                 show_image(image_info["image_array"])
