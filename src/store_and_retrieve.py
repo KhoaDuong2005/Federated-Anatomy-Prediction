@@ -32,5 +32,23 @@ def save_images_to_mongodb(images: List[np.ndarray], file_names: List[str], meta
         print(f"Error saving image: {e}")
         return []
 
-def load_images_from_mongodb(query: Dict = None):
-    pass
+def load_images_from_mongodb(query: Dict = None) -> List(Dict[str, Union[str, np.ndarray]]):
+    
+    query = query or {} #Fetch all the query if query  None
+    results = []
+    cursor = collection.find(querry)
+
+    for doc in cursor:
+        file_id = doc["file_id"]
+        file_data = fs.get(file_id).read()
+        image_array = np.load(BytesIO(file_data))
+
+        image_info = {
+            "filename": doc["file_name"],
+            "image_array": image_array,
+            "metadata": {key: value for key, value in doc.items() if key not in ["_id", "file_id"]} #Return metadata except id of the file in mongodb (id)
+        }
+        results.append(image_info)
+    
+    print("f{len(results) Image loaded from MongoDB}")
+    return results
