@@ -7,9 +7,11 @@ from typing import List, Dict
 client = pymongo.MongoClient("mongodb://localhost:27017")
 db = client["medical_db"]
 fs = GridFS(db)
-collection = db["images"]
+fs_train = gridfs.GridFS(db, collection="training_images")
+fs_val = gridfs.GridFS(db, collection="validation_images")
 
-def save_images_to_mongodb(images: List[np.ndarray], file_names: List[str], metadata: List[Dict] = None):
+
+def save_images_to_mongodb(images: List[np.ndarray], file_names: List[str], metadata: List[Dict] = None, is_train: bool = True):
     file_ids = []
     try:
         for i, image in enumerate(images):
