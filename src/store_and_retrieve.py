@@ -6,44 +6,64 @@ from typing import List, Dict, Union
 
 client = pymongo.MongoClient("mongodb://localhost:27017")
 db = client["medical_db"]
-fs_train = GridFS(db, collection="training_images")
-fs_val = GridFS(db, collection="validation_images")
 
 
-def save_images_to_mongodb(images: List[np.ndarray], file_names: List[str], metadata: List[Dict] = None, is_train: bool = True):
+def save_images_to_mongodb(
+    images: List[np.ndarray], 
+    file_names: List[str], 
+    metadata: List[Dict] = None, 
+    modality: str = None, 
+    body_part: str = None, 
+    is_validate: bool = True
+):
     file_ids = []
+
     try:
-        fs = fs_train if is_train else fs_val
-        collection_name = "training_images" if is_train else"validation_images"
+        collection_name = "validation" if is_validate else "training"
+        gridfs_collection_name = f"{collection_name}_{modality}_{body_part}_images"
+        metadata_collection_name = f"{collection_name}_{modality}_{body_part}_metadata"
+
+        fs = GridFS(db, collection=gridfs_collection_name)
+        metadata_collection = db[metadata_collection_name]
 
         for i, image in enumerate(images):
             image_bytes = BytesIO()
             np.save(image_bytes, image)
 
-            file_id = fs.put(image_bytes.read(), file_name = file_names[i])
+            file_id = fs.put(image_bytes.read(), file_name=file_names[i])
             file_ids.append(file_id)
 
-            data = {"file_name": file_names[i], "file_id": file_id}
-            
-            #check if metadata exist
+            metadata_entry = {
+                "file_name": file_names[i],
+                "file_id": file_id,
+                "dataset_type": collection_name,
+                "modality": modality,
+                "body_part": body_part
+            }
+
             if metadata:
-                data.update(metadata[i])
+                metadata_entry.update(metadata[i])
+            metadata_collection.insert_one(metadata_entry)
                 
-        print("f{len(file_ids) Images has been saved to MongoDB}")
+        print(f"{len(file_ids)} Images have been saved to MongoDB under {gridfs_collection_name}")
         return file_ids
 
     except Exception as exception:
-        print(f"Error saving image: {e}")
+        print(f"Error saving image: {exception}")
         return []
 
-def load_images_from_mongodb(query: Dict = None, is_train : bool = True) -> List[Dict[str, Union[str, np.ndarray]]]:
+
+
+def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_validate : bool = True) -> List[Dict[str, Union[str, np.ndarray]]]:
     
     query = query or {} #Fetch all the query if query  None
     results = []
-    fs = fs_train if is_train else fs_bool
-    collection_name = "training_images" if is_train else "validation_images"
+    collection_name = f"{"validation" if is_validate else "training"}_{modality}_{body_part}_images"
+    fs = GridFS(db, collection=collection_name)
     
     try:
+        cursor = db[collection_name].find(query)
+
         for doc in cursor:
             file_id = doc["file_id"]
             file_data = fs.get(file_id).read()
