@@ -17,16 +17,16 @@ def save_images_to_mongodb(
     modality: str = None, 
     body_part: str = None,
     is_anatomy: str = "False",
-    is_validate: bool = True
 ):
     file_ids = []
 
     try:
-        collection_name = f"{"validation" if is_validate else "training"}_{modality}_{body_part}_images"
-        metadata_collection_name = f"{collection_name}_metadata"
-
+        collection_name = f"{modality}_{body_part}_images"
         fs = GridFS(db, collection=collection_name)
-        metadata_collection = db[metadata_collection_name]
+        metadata_collection = db[f"{collection_name}_metadata"]
+
+        #count the number of document in the collection for naming the files
+        document_count = metadata_collection.count_documents({})
 
         for i, image in enumerate(images):
             image_bytes = BytesIO()
@@ -34,14 +34,14 @@ def save_images_to_mongodb(
             image_bytes.seek(0)
 
             file_id = fs.put(image_bytes.read(),
-            file_name=file_names[i],
+            file_name=document_count,
             is_anatomy= "False" if (is_anatomy == None or is_anatomy == "False") else "True"
             )
 
             file_ids.append(file_id)
 
             metadata_entry = {
-                "file_name": file_names[i],
+                "file_name": document_count,
                 "file_id": file_id,
                 "dataset_type": collection_name,
                 "modality": modality,
@@ -49,11 +49,16 @@ def save_images_to_mongodb(
                 "is_anatomy": "False" if (is_anatomy == None or is_anatomy == "False") else "True"
             }
 
+            document_count += 1
+
             if metadata:
                 metadata_entry.update(metadata[i])
             metadata_collection.insert_one(metadata_entry)
-                
-        print(f"{len(file_ids)} Images ({"Anatomy" if is_anatomy else "No Anatomy"} image) have been saved to MongoDB under {collection_name}")
+        if is_anatomy:
+            anatomy = "Anatomy"
+        else:
+            anatomy = "No Anatomy"
+        print(f"{len(file_ids)} Images ({anatomy} image) have been saved to MongoDB under {collection_name}")
         return file_ids
 
     except Exception as exception:
@@ -61,11 +66,11 @@ def save_images_to_mongodb(
         return []
 
 
-def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_anatomy: str = None, is_validate: bool = True) -> List[Dict[str, Union[str, np.ndarray]]]:
+def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_anatomy: str = None) -> List[Dict[str, Union[str, np.ndarray]]]:
     
     query = {}
     results = []
-    collection_name = f"{'validation' if is_validate else 'training'}_{modality}_{body_part}_images"
+    collection_name = f"{modality}_{body_part}_images"
     fs = GridFS(db, collection=collection_name)
     metadata_collection = db[f"{collection_name}_metadata"]
 
@@ -100,8 +105,8 @@ def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part
         return []
         
 
-def get_image_info(query, modality, body_part, is_anatomy, is_validate):
-    images_info = load_images_from_mongodb(query, modality, body_part, is_anatomy, is_validate)
+def get_image_info(query, modality, body_part, is_anatomy):
+    images_info = load_images_from_mongodb(query, modality, body_part, is_anatomy)
     return images_info
 
 
