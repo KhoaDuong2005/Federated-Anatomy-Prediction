@@ -43,16 +43,16 @@ if __name__ == "__main__":
     try:
         modality = validate_modality(args.mod)
         body_part = validate_body_part(args.body)
+        is_anatomy = args.ana
+
 
         if args.directory:
             target_size = args.size
             target_size = tuple(map(int, target_size.split(',')))
-            is_anatomy = args.ana
             process_directory(args.directory, modality, body_part, is_anatomy, target_size)
             print(f"Files have been saved as {target_size}, if you want to change it, use --size x,y as a parameter (default is 256,256)")
 
         if args.im is not None:
-            is_anatomy = args.ana
             from store_and_retrieve import get_image_info
             images_info = get_image_info(None, modality, body_part, is_anatomy,)
             for i, image_info in enumerate(images_info):
@@ -60,7 +60,7 @@ if __name__ == "__main__":
             for i in range (args.im):
                 random_number = random.randint(0, (len(images_info)))
                 print(images_info[random_number]["image_array"].shape)
-                show_image(images_info[random_number]["image_array"])
+                show_image(images_info[random_number]["image_array"], modality, body_part)
 
     except Exception as exception:
         print(f"Error: {exception}")
