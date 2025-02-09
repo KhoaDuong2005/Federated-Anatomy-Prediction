@@ -16,10 +16,9 @@ def save_images_to_mongodb(
     metadata: List[Dict] = None, 
     modality: str = None, 
     body_part: str = None,
-    is_anatomy: str = "False",
+    is_anatomy: bool = None,
 ):
     file_ids = []
-
     try:
         collection_name = f"{modality}_{body_part}_images"
         fs = GridFS(db, collection=collection_name)
@@ -35,7 +34,7 @@ def save_images_to_mongodb(
 
             file_id = fs.put(image_bytes.read(),
             file_name=document_count,
-            is_anatomy= "False" if (is_anatomy == None or is_anatomy == "False") else "True"
+            is_anatomy= is_anatomy
             )
 
             file_ids.append(file_id)
@@ -46,7 +45,7 @@ def save_images_to_mongodb(
                 "dataset_type": collection_name,
                 "modality": modality,
                 "body_part": body_part,
-                "is_anatomy": "False" if (is_anatomy == None or is_anatomy == "False") else "True"
+                "is_anatomy": is_anatomy
             }
 
             document_count += 1
@@ -66,7 +65,7 @@ def save_images_to_mongodb(
         return []
 
 
-def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_anatomy: str = None) -> List[Dict[str, Union[str, np.ndarray]]]:
+def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_anatomy: bool = None) -> List[Dict[str, Union[str, np.ndarray]]]:
     
     query = {}
     results = []
@@ -74,12 +73,6 @@ def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part
     fs = GridFS(db, collection=collection_name)
     metadata_collection = db[f"{collection_name}_metadata"]
 
-    if is_anatomy == None:
-        pass
-    elif is_anatomy == "True":
-        query["is_anatomy"] = "True"
-    else:
-        query["is_anatomy"] = "False"
 
     try:
         cursor = db[f"{collection_name}.files"].find(query)
