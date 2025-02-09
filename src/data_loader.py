@@ -19,14 +19,16 @@ def load_medical_image(file_path, size):
 
         if image_array.ndim == 3:
             image_array = image_array[:, :, 0]
-
-        image_array = np.stack([image_array] * 3, axis=0)
+    
+        image_array = np.stack([image_array] * 3, axis=2)
 
         return image_array
     except:
         raise ValueError("File not supported")
 
-def show_image(image_array):
-    plt.imshow(image_array[0,:,:], cmap = "gray")
+def show_image(image_array, modality, body_part):
+    plt.imshow(image_array[:,:,0], cmap = "gray")
+    plt.title(f"{modality} {body_part}")
     plt.show()
+
 
