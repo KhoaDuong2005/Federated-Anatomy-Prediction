@@ -13,12 +13,11 @@ from typing import List
 
 def process_directory(directory: str, modality: str, body_part: str, label: List, size: tuple):
     metadata_list = []
-    config = validate_client_data(directory)
     try:
         images_array, file_names, label = load_images_based_on_config(directory, config, size)
         save_images_to_mongodb(images_array, file_names, metadata_list, modality, body_part, label)
     except Exception as exception:
-            print("No valid image found in the directory, error: {exception}")
+            print(f"No valid image found in the directory, error: {exception}")
 
 
 if __name__ == "__main__":
