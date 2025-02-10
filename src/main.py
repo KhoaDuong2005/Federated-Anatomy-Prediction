@@ -1,32 +1,24 @@
-from data_loader import load_medical_image, show_image
-from store_and_retrieve import save_images_to_mongodb, load_images_from_mongodb
+from data_loader import *
+from store_and_retrieve import *
 from validators import *
 import os
 import argparse
 import random
 import matplotlib.pyplot as plt
+import json
+from typing import List
 
 
-def process_directory(directory: str, modality: str, body_part: str, is_anatomy: bool, size: tuple):
-    images = []
-    file_names = []
+
+
+def process_directory(directory: str, modality: str, body_part: str, label: List, size: tuple):
     metadata_list = []
-
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
-
-        try:
-            images_array = load_medical_image(file_path, size)
-            images.append(images_array)
-            file_names.append(filename)
-        
-        except Exception as exception:
-            print(f"Skipping file: {filename}: {exception}")
-    if images:
-        save_images_to_mongodb(images, file_names, metadata_list, modality, body_part, is_anatomy)
-    else:
-        print("No valid image found in the directory")
-
+    config = validate_client_data(directory)
+    try:
+        images_array, file_names, label = load_images_based_on_config(directory, config, size)
+        save_images_to_mongodb(images_array, file_names, metadata_list, modality, body_part, label)
+    except Exception as exception:
+            print("No valid image found in the directory, error: {exception}")
 
 
 if __name__ == "__main__":
@@ -36,17 +28,18 @@ if __name__ == "__main__":
     parser.add_argument("--body", type=str, required=True, help="Specify the body part (chest, brain, abdomen, leg, ...)")
     parser.add_argument("--im", type=int, help="Specify number of image randomly print in a specific database in MongoDB")
     parser.add_argument("--size", type=str, default="256,256", help="Specify the size of image before saving to MongoDB (default = 256,256)")
-    parser.add_argument("--ana", action="store_true", help="Specify whether the images being saved have anatomy or not")
+    # parser.add_argument("--ana", action="store_true", help="Specify whether the images being saved have anatomy or not")
 
     args = parser.parse_args()
 
     try:
         modality = validate_modality(args.mod)
         body_part = validate_body_part(args.body)
-        is_anatomy = args.ana
+        is_anatomy = None
 
 
         if args.directory:
+            config = validate_client_data(args.directory)
             target_size = args.size
             target_size = tuple(map(int, target_size.split(',')))
             process_directory(args.directory, modality, body_part, is_anatomy, target_size)
