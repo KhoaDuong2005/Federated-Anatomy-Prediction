@@ -5,9 +5,12 @@ from io import BytesIO
 from typing import List, Dict, Union
 from data_loader import show_image
 from validators import *
-
+import os
+    
 client = pymongo.MongoClient("mongodb://localhost:27017")
 db = client["medical_db"]
+
+
 
 
 def save_images_to_mongodb(
@@ -16,7 +19,7 @@ def save_images_to_mongodb(
     metadata: List[Dict] = None, 
     modality: str = None, 
     body_part: str = None,
-    is_anatomy: bool = None,
+    label: List[bool] = None,
 ):
     file_ids = []
     try:
@@ -34,18 +37,18 @@ def save_images_to_mongodb(
 
             file_id = fs.put(image_bytes.read(),
             file_name=document_count,
-            is_anatomy= is_anatomy
+            is_anatomy=label[i] if label else None,
             )
 
             file_ids.append(file_id)
 
             metadata_entry = {
-                "file_name": document_count,
+                "file_name": file_names[i],
                 "file_id": file_id,
                 "dataset_type": collection_name,
                 "modality": modality,
                 "body_part": body_part,
-                "is_anatomy": is_anatomy
+                "is_anatomy": label[i] if label else None,
             }
 
             document_count += 1
@@ -53,11 +56,8 @@ def save_images_to_mongodb(
             if metadata:
                 metadata_entry.update(metadata[i])
             metadata_collection.insert_one(metadata_entry)
-        if is_anatomy:
-            anatomy = "Anatomy"
-        else:
-            anatomy = "No Anatomy"
-        print(f"{len(file_ids)} Images ({anatomy} image) have been saved to MongoDB under {collection_name}")
+            
+        print(f"{len(file_ids)} Images have been saved to MongoDB under {collection_name}")
         return file_ids
 
     except Exception as exception:
@@ -103,7 +103,3 @@ def get_image_info(query, modality, body_part, is_anatomy):
     return images_info
 
 
-
-# metadata_collection_name = f"{"validation" if is_validate else "training"}_{modality}_{body_part}_metadata"
-# metadata_entry = db[metadata_collection_name].find_one({"file_id": file_id})
-# print(f"Metadata for file_id {file_id}: {metadata_entry}")
