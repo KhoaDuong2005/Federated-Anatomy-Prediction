@@ -4,17 +4,14 @@ from validators import *
 import os
 import argparse
 import random
-import matplotlib.pyplot as plt
 import json
 from typing import List
-
-
 
 
 def process_directory(directory: str, modality: str, body_part: str, label: List, size: tuple):
     metadata_list = []
     try:
-        images_array, file_names, label = load_images_based_on_config(directory, config, size)
+        images_array, file_names, label = save_images_based_on_config(directory, config, size)
         save_images_to_mongodb(images_array, file_names, metadata_list, modality, body_part, label)
     except Exception as exception:
             print(f"No valid image found in the directory, error: {exception}")
@@ -38,20 +35,23 @@ if __name__ == "__main__":
 
 
         if args.directory:
-            config = validate_client_data(args.directory)
-            target_size = args.size
-            target_size = tuple(map(int, target_size.split(',')))
-            process_directory(args.directory, modality, body_part, is_anatomy, target_size)
-            print(f"Files have been saved as {target_size}, if you want to change it, use --size x,y as a parameter (default is 256,256)")
+            try:
+                config = validate_client_data(args.directory)
+                target_size = args.size
+                target_size = tuple(map(int, target_size.split(',')))
+                process_directory(args.directory, modality, body_part, is_anatomy, target_size)
+                print(f"Files have been saved as {target_size}, if you want to change it, use --size x,y as a parameter (default is 256,256)")
+            except Exception as exception:
+                print(f"Error when going through directory: {exception}")
 
         if args.im is not None:
             from store_and_retrieve import get_image_info
-            images_info = get_image_info(None, modality, body_part, is_anatomy,)
+            images_info = get_image_info(None, modality, body_part, is_anatomy)
             for i, image_info in enumerate(images_info):
                 pass
             for i in range (args.im):
                 random_number = random.randint(0, (len(images_info)))
-                print(images_info[random_number]["image_array"].shape)
+                print(f"Image shape: {images_info[random_number]["image_array"].shape}")
                 show_image(images_info[random_number]["image_array"], modality, body_part)
 
     except Exception as exception:
