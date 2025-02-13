@@ -3,3 +3,10 @@ src/__pycache__
 src/tempCodeRunnerFile.py
 src/testing.py
 src/learning.ipynb
+.vscode
+logs
+src/test.ipynb
+.venv
+src/.ipynb_checkpoints
+create_config.py
+revert.py
