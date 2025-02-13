@@ -3,7 +3,6 @@ import numpy as np
 from gridfs import GridFS
 from io import BytesIO
 from typing import List, Dict, Union
-from data_loader import show_image
 from validators import *
 import os
 from tqdm import tqdm
@@ -102,5 +101,4 @@ def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part
 def get_image_info(query, modality, body_part, is_anatomy):
     images_info = load_images_from_mongodb(query, modality, body_part, is_anatomy)
     return images_info
-
 
