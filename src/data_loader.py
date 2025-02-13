@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import cv2
 import os
 import pandas as pd
+from tqdm import tqdm, trange
 
 
 
@@ -30,14 +31,16 @@ def load_images_based_on_config(directory, config, size):
     images = []
     labels = []
     file_names_list = []
+    folder_path = os.path.join(directory, config["image_folder"])
+    if not os.path.exists(folder_path):
+        raise ValueError(f"Directory {folder_path} does not exist")
     try:
         if config["label_format"] == "label_folder":
-            for dir_path, dir_names, file_names in os.walk(directory):
-                for file_name in file_names:
+            for dir_path, dir_names, file_names in os.walk(folder_path): #go through all the files in the directory
+                for file_name in tqdm(file_names, desc="Loading images"):
                     file_path = os.path.join(dir_path, file_name)
                     is_anatomy = dir_path.endswith("anatomy")
                     try:
-                        print(f"Loading file: {file_path}")
                         image_array = load_medical_image(file_path, size)
                         images.append(image_array)
                         file_names_list.append(file_name)
@@ -46,14 +49,13 @@ def load_images_based_on_config(directory, config, size):
                         print(f"Skipping file: {file_name}: {exception}")
             return images, file_names_list, labels
         
+
         elif config["label_format"] == "label_file":
-            folder_path = os.path.join(directory, config["image_folder"])
-            for dir_path, dir_names, file_names in os.walk(folder_path):
-                for file_name in file_names:
+            for dir_path, dir_names, file_names in os.walk(folder_path): #go through all the files in the directory
+                for file_name in tqdm(file_names, desc="Loading images"):
                     file_path = os.path.join(dir_path, file_name)
                     is_anatomy = os.path.splitext(file_name)[0].endswith("_1")
                     try:
-                        print(f"Loading file: {file_path}")
                         image_array = load_medical_image(file_path, size)
                         images.append(image_array)
                         file_names_list.append(file_name)
@@ -62,15 +64,14 @@ def load_images_based_on_config(directory, config, size):
                         print(f"Skipping file: {file_name}: {exception}")
             return images, file_names_list, labels
         
-        elif config["label_format"] == "label_csv":
-            folder_path = os.path.join(directory, config["image_folder"])
 
+        elif config["label_format"] == "label_csv":
             csv_path = os.path.join(directory, config["label_file_path"])
             df = pd.read_csv(csv_path)
             label_dictionary = dict(zip(df["SeriesInstanceUID"], zip(df["normal"], df["abnormal"])))
 
-            for dir_path, dir_names, file_names in os.walk(folder_path):
-                for file_name in file_names:
+            for dir_path, dir_names, file_names in os.walk(folder_path): #go through all the files in the directory
+                for file_name in tqdm(file_names, desc="Loading images"):
                     file_path = os.path.join(dir_path, file_name)
                     folder_name = os.path.basename(os.path.dirname(file_path))
                     try:
@@ -85,8 +86,6 @@ def load_images_based_on_config(directory, config, size):
     except Exception as exception:
         print(f"Error when trying to load images based on config: {exception}")
     
-
-
 
 def show_image(image_array, modality, body_part):
     image_array = image_array[:, :, 0]
