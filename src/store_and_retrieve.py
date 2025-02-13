@@ -6,6 +6,7 @@ from typing import List, Dict, Union
 from data_loader import show_image
 from validators import *
 import os
+from tqdm import tqdm
     
 client = pymongo.MongoClient("mongodb://localhost:27017")
 db = client["medical_db"]
@@ -66,32 +67,32 @@ def save_images_to_mongodb(
 
 
 def load_images_from_mongodb(query: Dict = None, modality: str = None, body_part: str = None, is_anatomy: bool = None) -> List[Dict[str, Union[str, np.ndarray]]]:
-    
     query = {}
     results = []
     collection_name = f"{modality}_{body_part}_images"
     fs = GridFS(db, collection=collection_name)
     metadata_collection = db[f"{collection_name}_metadata"]
 
-
     try:
+        cursor_count = db[f"{collection_name}.files"].count_documents(query)
         cursor = db[f"{collection_name}.files"].find(query)
 
+        with tqdm(total=cursor_count, desc="Loading images", unit=" images") as pbar:
+            for doc in cursor:
+                file_id = doc["_id"]
+                file_data = fs.get(file_id).read()  
+                image_array = np.load(BytesIO(file_data))
 
-        for doc in cursor:
-            file_id = doc["_id"]
-            file_data = fs.get(file_id).read()  
-            image_array = np.load(BytesIO(file_data))
+                image_info = {  
+                    "filename": doc["file_name"],
+                    "image_array": image_array,
+                    "metadata": {key: value for key, value in doc.items() if key not in ["_id", "file_id"]}  
+                }
+                results.append(image_info)
+                pbar.update(1)
 
-            image_info = {
-                "filename": doc["file_name"],
-                "image_array": image_array,
-                "metadata": {key: value for key, value in doc.items() if key not in ["_id", "file_id"]}  
-            }
-            results.append(image_info)
-
-        print(f"{len(results)} Image(s) loaded from MongoDB")
-        return results
+            print(f"{len(results)} Image(s) loaded from MongoDB")
+            return results
 
     except Exception as exception:
         print(f"Error while loading images: {exception}")
