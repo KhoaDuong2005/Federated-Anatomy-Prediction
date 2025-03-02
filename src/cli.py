@@ -10,7 +10,7 @@ def parse_arg():
     parser = argparse.ArgumentParser(description="Load and save all images from a directory to MongoDB")
     parser.add_argument("directory", type=str, nargs="?", default=None , help="Path to the directory containing medical images")
     parser.add_argument("-m", "--mod", type=str, help="Specify the imaging modality (mri, ct, xray)")
-    parser.add_argument("b", "--body", type=str, help="Specify the body part (chest, brain, abdomen, leg, ...)")
+    parser.add_argument("-b", "--body", type=str, help="Specify the body part (chest, brain, abdomen, leg, ...)")
     parser.add_argument("--im", type=int, help="Specify number of image randomly print in a specific database in MongoDB")
     parser.add_argument("--size", type=str, default="256,256", help="Specify the size of image before saving to MongoDB (default = 256,256)")
     parser.add_argument("--cfg", type=str, nargs=3, help="Create a config file for the client data")
@@ -22,6 +22,7 @@ def parse_arg():
         modality = validate_modality(args.mod)
         body_part = validate_body_part(args.body)
         is_anatomy = None
+
 
         if args.cfg:
             try:

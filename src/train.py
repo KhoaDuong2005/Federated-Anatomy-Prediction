@@ -60,7 +60,15 @@ valid_loader = DataLoader(valid_data, batch_size=32, shuffle=False)
 
 model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
 num_of_features = model.fc.in_features
-model.fc = nn.Linear(num_of_features, len(dataset.classes))
+
+model.fc = nn.Sequential(
+    nn.Linear(num_of_features, 512),
+    nn.BatchNorm1d(512),
+    nn.ReLU(),
+    nn.Dropout(0.5),
+    nn.Linear(512, len(dataset.classes))
+)
+
 model = model.to(device)
 
 
