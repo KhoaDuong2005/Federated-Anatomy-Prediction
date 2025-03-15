@@ -8,7 +8,7 @@ version = "1.0.0"
 description = ""
 license = "Apache-2.0"
 dependencies = [
-    "flwr[simulation]>=1.15.2",
+    "flwr[simulation]>=1.16.0",
     "flwr-datasets[vision]>=0.5.0",
     "torch==2.5.1",
     "torchvision==0.20.1",
@@ -18,7 +18,7 @@ dependencies = [
 packages = ["."]
 
 [tool.flwr.app]
-publisher = "Elton"
+publisher = "elton"
 
 [tool.flwr.app.components]
 serverapp = "elton.server_app:app"
@@ -27,10 +27,15 @@ clientapp = "elton.client_app:app"
 [tool.flwr.app.config]
 num-server-rounds = 3
 fraction-fit = 0.5
-local-epochs = 1
+local-epochs = 5
+data_dir = "D:/Docs/chest_xray/train"
+
 
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 10
+options.num-supernodes = 3
+
+[tool.flwr.node_config]
+data_dir = "D:/Docs/chest_xray"

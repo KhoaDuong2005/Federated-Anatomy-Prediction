@@ -1,99 +1,73 @@
-"""Elton: A Flower / PyTorch app."""
-
-import json
-from typing import List, Tuple
-from flwr.common import Context, ndarrays_to_parameters, Metrics
+"""elton: A Flower / PyTorch app."""
+import os
+from flwr.common import Context, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
-from datasets import load_dataset
+from flwr.server.strategy import FedAvg
+from elton.task import Net, get_weights, set_weights, test, load_test_data
 from torch.utils.data import DataLoader
 
-from elton.task import Net, get_weights, set_weights, test, get_transforms
-from elton.my_strategy import CustomFedAvg
-
+from torchvision import transforms
+def get_image_transforms():
+    return transforms.Compose([
+    transforms.Resize((256, 256)), ###### test #######
+    transforms.CenterCrop(224), 
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225])
+])
 
 def get_evaluate_fn(testloader, device):
     """Return a callback that evaluates the global model."""
-
     def evaluate(server_round, parameters_ndarrays, config):
-        """Evaluate global model using provided centralised testset."""
-        # Instantiate model
         net = Net()
-        # Apply global_model parameters
         set_weights(net, parameters_ndarrays)
         net.to(device)
-        # Run test
         loss, accuracy = test(net, testloader, device)
-
-        return loss, {"Centralized_accuracy": accuracy}
-
+        return loss, {"cen_accuracy": accuracy}
     return evaluate
 
+def on_fit_config(server_round: int):
+    lr = 3e-4
+    if server_round > 2:
+        lr = 1e-4
+    return {"lr": lr}
 
-def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-    """Aggregates metrics from an evaluate round."""
-    # Loop trough all metrics received compute accuracies x examples
-    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
-    total_examples = sum(num_examples for num_examples, _ in metrics)
-    # Return weighted average accuracy
-    return {"accuracy": sum(accuracies) / total_examples}
-
-
-def handle_fit_metrics(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-    """Aggregate metrics from a fit round.
-
-    This function showed a mechanism to communicate almost arbitrary metrics by
-    converting them into a JSON on the ClientApp side. Here that JSON string is
-    deserialized and reinterpreted as a dictionary we can use.
-    """
+def handle_fit_metrics(metrics):
+    import json
     b_values = []
     for _, m in metrics:
         my_metric_str = m["my_metric"]
-        # Deserialize JSON and return dict
         my_metric = json.loads(my_metric_str)
         b_values.append(my_metric["b"])
-    # Return maximum value from deserialized metrics
     return {"max_b": max(b_values)}
 
-
-def on_fit_config(server_round: int) -> Metrics:
-    """Adjusts learning rate based on current round."""
-    lr = 0.01
-    # Appply a simple learning rate decay
-    if server_round > 2:
-        lr = 0.005
-    return {"lr": lr}
-
+def weighted_average(metrics):
+    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
+    total_examples = sum(num_examples for num_examples, _ in metrics)
+    return {"accuracy": sum(accuracies) / total_examples}
 
 def server_fn(context: Context):
-    """A function that creates the components for a ServerApp."""
-    # Read from Run config
     num_rounds = context.run_config["num-server-rounds"]
     fraction_fit = context.run_config["fraction-fit"]
 
-    # Initialize model parameters
     ndarrays = get_weights(Net())
     parameters = ndarrays_to_parameters(ndarrays)
 
-    # Load global test set
-    testset = load_dataset("zalando-datasets/fashion_mnist")["test"]
-    # Construct dataloader
-    testloader = DataLoader(testset.with_transform(get_transforms()), batch_size=32)
+    # Use the custom dataset for evaluation.
+    data_dir = r"D:\Docs\chest_xray\test"
+    cache_filename = r"test_processed_data.pkl"
+    testloader = load_test_data(data_dir, cache_filename)
 
-    # Define strategy
-    strategy = CustomFedAvg(
+    strategy = FedAvg(
         fraction_fit=fraction_fit,
-        fraction_evaluate=1.0,  # All nodes are sampled for evaluation
+        fraction_evaluate=1.0,
         min_available_clients=2,
         initial_parameters=parameters,
         evaluate_metrics_aggregation_fn=weighted_average,
         fit_metrics_aggregation_fn=handle_fit_metrics,
-        on_fit_config_fn=on_fit_config,
-        evaluate_fn=get_evaluate_fn(testloader, device="cpu"),
+        on_evaluate_config_fn=on_fit_config,
+        evaluate_fn=get_evaluate_fn(testloader, device="cuda")
     )
     config = ServerConfig(num_rounds=num_rounds)
-
     return ServerAppComponents(strategy=strategy, config=config)
 
-
-# Create ServerApp
 app = ServerApp(server_fn=server_fn)

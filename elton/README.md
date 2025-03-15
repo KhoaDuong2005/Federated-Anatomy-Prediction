@@ -1,4 +1,4 @@
-# Elton: A Flower / PyTorch app
+# elton: A Flower / PyTorch app
 
 ## Install dependencies and project
 
@@ -8,7 +8,7 @@ pip install -e .
 
 ## Run with the Simulation Engine
 
-In the `Elton` directory, use `flwr run` to run a local simulation:
+In the `elton` directory, use `flwr run` to run a local simulation:
 
 ```bash
 flwr run .

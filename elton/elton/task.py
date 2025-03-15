@@ -1,138 +1,193 @@
-"""Elton: A Flower / PyTorch app."""
+# task.py
+import os
+import pickle
+import numpy as np
+import math
 
 from collections import OrderedDict
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import DirichletPartitioner
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, Normalize, ToTensor
+import torch.optim as optim
+from torch.utils.data import DataLoader, random_split, Dataset
+from torchvision import models, transforms
+from PIL import Image
+from tqdm import tqdm
+
+transform = transforms.Compose([
+    transforms.RandomResizedCrop(224),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(15),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
+test_transform = transforms.Compose([
+    transforms.Resize((256, 256)), ###### test #######
+    transforms.CenterCrop(224), 
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225])
+])
 
 
 class Net(nn.Module):
-    """Model (simple CNN adapted from 'PyTorch: A 60 Minute Blitz')"""
-
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 4 * 4, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
+        self.model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        num_features = self.model.fc.in_features
+
+        self.model.fc = nn.Sequential(
+            nn.Linear(num_features, 1024, bias=False),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(1024, 512, bias=False),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(512, 256, bias=False),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+
+            nn.Linear(256, num_features)
+        )
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 4 * 4)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.model(x)
 
 
-def get_transforms():
-    """Return a function that apply standard transformations to images."""
+def load_image_data(data_dir: str, target_size=(256, 256)):
+    images = []
+    labels = []
+    label_names = sorted([directory for directory in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, directory))])
+    
+    label_index = {}
 
-    pytorch_transforms = Compose([ToTensor(), Normalize((0.5,), (0.5,))])
+    for index, label_name in enumerate(label_names):
+        label_index[label_name] = index
 
-    def apply_transforms(batch):
-        """Apply transforms to the partition from FederatedDataset."""
-        batch["image"] = [pytorch_transforms(img) for img in batch["image"]]
-        return batch
+    for label_name in label_names:
+        folder_path = os.path.join(data_dir, label_name)
+        for file in tqdm(os.listdir(folder_path), desc=f"Loading ({label_name})"):
+            file_path = os.path.join(folder_path, file)
+            try:
+                image = Image.open(file_path).convert("RGB")
+                image = image.resize(target_size)
+                image_np = np.array(image)
+                images.append(image_np)
+                labels.append(label_index[label_name])
+            except Exception as e:
+                print(f"Skipping file {file_path}, error: {e}")
+    return images, labels
 
-    return apply_transforms
+class NumpyDataset(Dataset):
+    def __init__(self, images: list, labels: list, transform=None):
+        super().__init__()
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image_np = self.images[idx]
+        label = self.labels[idx]
+        # Convert the numpy array to a PIL Image for transforms
+        image = Image.fromarray(image_np)
+        if self.transform:
+            image = self.transform(image)
+        label = torch.tensor(label)
+        return image, label
 
 
-fds = None  # Cache FederatedDataset
 
+def load_data(data_dir: str, cache_filename: str):
+    cache_file = os.path.join(data_dir, cache_filename)
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as file:
+            images, labels = pickle.load(file)
+    else:
+        images, labels = load_image_data(data_dir)
+        with open(cache_file, "wb") as file:
+            pickle.dump((images, labels), file)
 
-def load_data(partition_id: int, num_partitions: int):
-    """Load partition FashionMNIST data."""
-    # Only initialize `FederatedDataset` once
-    global fds
-    if fds is None:
-        partitioner = DirichletPartitioner(
-            num_partitions=num_partitions, partition_by="label", alpha=1.0
-        )
-        fds = FederatedDataset(
-            dataset="zalando-datasets/fashion_mnist",
-            partitioners={"train": partitioner},
-        )
-    partition = fds.load_partition(partition_id)
-    # Divide data on each node: 80% train, 20% test
-    partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
+    dataset = NumpyDataset(images, labels, transform=transform)
+    
+    valid_pct = 0.2
+    num_valid = int(valid_pct * len(dataset))
+    num_train = len(dataset) - num_valid
 
-    partition_train_test = partition_train_test.with_transform(get_transforms())
-    trainloader = DataLoader(partition_train_test["train"], batch_size=32, shuffle=True)
-    testloader = DataLoader(partition_train_test["test"], batch_size=32)
-    return trainloader, testloader
+    train_dataset, valid_dataset = random_split(dataset, [num_train, num_valid],generator=torch.Generator().manual_seed(42))
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=32)
+
+    return train_loader, valid_loader
+
+def load_test_data(data_dir: str, cache_filename: str):
+    cache_file = os.path.join(data_dir, cache_filename)
+    if os.path.exists(cache_file):
+        print("Loading from cache file")
+        with open(cache_file, "rb") as file:
+            images, labels = pickle.load(file)
+    else:
+        print("Loading from folder")
+        images, labels = load_image_data(data_dir)
+        with open(cache_file, "wb") as file:
+            pickle.dump((images, labels), file)
+
+    dataset = NumpyDataset(images, labels, transform=test_transform)
+    
+    test_loader = DataLoader(dataset, batch_size=32)
+
+    return test_loader
 
 
 def train(net, trainloader, epochs, lr, device):
-    """Train the model on the training set.
-
-    This is a fairly standard training loop for PyTorch. Note there is nothing specific
-    about Flower or Federated AI here.
-    """
-    net.to(device)  # move model to GPU if available
+    net.to(device)
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    optimizer = optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-3)
+    T_max = math.floor(len(trainloader.dataset) / 32) #batch size
+    scheduler =  torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
     net.train()
     running_loss = 0.0
     for _ in range(epochs):
-        for batch in trainloader:
-            images = batch["image"]
-            labels = batch["label"]
+        for images, labels in trainloader:
             optimizer.zero_grad()
             loss = criterion(net(images.to(device)), labels.to(device))
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+        scheduler.step()
 
     avg_trainloss = running_loss / len(trainloader)
     return avg_trainloss
 
-
 def test(net, testloader, device):
-    """Validate the model on the test set.
-
-    This is a fairly standard training loop for PyTorch. Note there is nothing specific
-    about Flower or Federated AI here.
-    """
     net.to(device)
     criterion = torch.nn.CrossEntropyLoss()
     correct, loss = 0, 0.0
     with torch.no_grad():
-        for batch in testloader:
-            images = batch["image"].to(device)
-            labels = batch["label"].to(device)
+        for images, labels in testloader:
+            images = images.to(device)
+            labels = labels.to(device)
             outputs = net(images)
             loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+            correct += (torch.max(outputs, 1)[1] == labels).sum().item()
     accuracy = correct / len(testloader.dataset)
     loss = loss / len(testloader)
     return loss, accuracy
 
-
 def get_weights(net):
-    """Extract parameters from a model.
-
-    Note this is specific to PyTorch. You might want to update this function if you use
-    a more exotic model architecture or if you don't want to extrac all elements in
-    state_dict.
-    """
     return [val.cpu().numpy() for _, val in net.state_dict().items()]
 
-
 def set_weights(net, parameters):
-    """Copy paramteres onto the model.
-
-    Note this is specific to PyTorch. You might want to update this function if you use
-    a more exotic model architecture or if you don't want to replace the entire
-    state_dict.
-    """
     params_dict = zip(net.state_dict().keys(), parameters)
-    state_dict = OrderedDict({k: torch.from_numpy(v) for k, v in params_dict})
+    state_dict = {k: torch.tensor(v) for k, v in params_dict}
     net.load_state_dict(state_dict, strict=True)

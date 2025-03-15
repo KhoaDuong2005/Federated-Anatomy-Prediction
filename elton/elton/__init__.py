@@ -1,1 +1,1 @@
-"""Elton: A Flower / PyTorch app."""
+"""elton: A Flower / PyTorch app."""
