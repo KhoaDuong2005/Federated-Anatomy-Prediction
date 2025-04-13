@@ -9,7 +9,6 @@ import argparse
 import numpy as np
 import sys
 
-# Global variable to track if this client has already printed for this round
 _output_tracker = {}
 
 def get_model():
@@ -70,19 +69,14 @@ class FlowerClient(fl.client.NumPyClient):
         )
 
     def get_parameters(self, config=None):
-        """Get model parameters as a list of NumPy arrays."""
         params = []
         with torch.no_grad():
             for name, param in self.model.state_dict().items():
-                # Handle different parameter types
                 if "num_batches_tracked" in name:
-                    # Integer parameters (batch norm tracking)
                     param_np = param.cpu().detach().numpy().astype(np.int64)
                 else:
-                    # Float parameters (weights & biases)
                     param_np = param.cpu().detach().numpy().astype(np.float32)
                 
-                # Ensure array is C-contiguous
                 if not param_np.flags.c_contiguous:
                     param_np = np.ascontiguousarray(param_np)
                     
@@ -91,11 +85,9 @@ class FlowerClient(fl.client.NumPyClient):
         return params
 
     def set_parameters(self, parameters):
-        """Set model parameters from a list of NumPy arrays."""
         state_dict_keys = list(self.model.state_dict().keys())
         state_dict = {}
         
-        # Process parameters with proper handling
         for i, name in enumerate(state_dict_keys):
             if i >= len(parameters):
                 state_dict[name] = self.model.state_dict()[name]
@@ -104,16 +96,13 @@ class FlowerClient(fl.client.NumPyClient):
             param = parameters[i]
             expected_shape = self.model.state_dict()[name].shape
             
-            # Convert byte data to numpy if needed
             if not isinstance(param, np.ndarray):
                 if "num_batches_tracked" in name:
                     param = np.frombuffer(param, dtype=np.int64)
                 else:
                     param = np.frombuffer(param, dtype=np.float32)
             
-            # Handle parameters based on shape and type
             if param.size == np.prod(expected_shape):
-                # Scalar tensors
                 if expected_shape == ():
                     scalar_value = param.item() if param.size == 1 else param[0]
                     if "num_batches_tracked" in name:
@@ -122,7 +111,6 @@ class FlowerClient(fl.client.NumPyClient):
                         tensor_dtype = self.model.state_dict()[name].dtype
                         state_dict[name] = torch.tensor(scalar_value, dtype=tensor_dtype).to(self.device)
                 else:
-                    # Regular tensors
                     reshaped_param = param.reshape(expected_shape)
                     if "num_batches_tracked" in name:
                         state_dict[name] = torch.tensor(reshaped_param, dtype=torch.int64).to(self.device)
@@ -130,31 +118,24 @@ class FlowerClient(fl.client.NumPyClient):
                         tensor_dtype = self.model.state_dict()[name].dtype
                         state_dict[name] = torch.tensor(reshaped_param, dtype=tensor_dtype).to(self.device)
             else:
-                # Fallback to original parameter
                 state_dict[name] = self.model.state_dict()[name]
         
-        # Load the state dict
         self.model.load_state_dict(state_dict, strict=True)
 
     def fit(self, parameters, config):
-        # Get configuration parameters
         client_id = config.get("client_id", self.client_id)
         epochs = config.get("epochs", 1)
         round_num = config.get("round_num", 0)
         
-        # Create a unique key for this training session
         session_key = f"{client_id}_fit_{round_num}"
         
-        # Skip duplicate processing
         global _output_tracker
         if session_key in _output_tracker:
             return self.get_parameters(), 0, {}
         _output_tracker[session_key] = True
         
-        # Set parameters and begin training
         self.set_parameters(parameters)
         
-        # Buffer all output for atomic printing
         all_output = []
         all_output.append(f"\n[Client {client_id}] Training for {epochs} epochs")
         
@@ -192,11 +173,9 @@ class FlowerClient(fl.client.NumPyClient):
             
             all_output.append(f"[Client {client_id}] Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_accuracy:.4f}")
 
-        # Evaluate after training
         val_loss, val_accuracy, val_output = self.evaluate_model(client_id, round_num)
         all_output.extend(val_output)
         
-        # Print all output at once for atomic display
         print('\n'.join(all_output), flush=True)
         
         return self.get_parameters(), len(self.train_loader.dataset), {
@@ -207,14 +186,11 @@ class FlowerClient(fl.client.NumPyClient):
         }
 
     def evaluate(self, parameters, config):
-        # Get configuration parameters
         client_id = config.get("client_id", self.client_id)
         round_num = config.get("round_num", 0)
         
-        # Create a unique key for this evaluation session
         session_key = f"{client_id}_eval_{round_num}"
         
-        # Skip duplicate processing
         global _output_tracker
         if session_key in _output_tracker:
             return 0, 0, {"val_accuracy": 0}
@@ -223,7 +199,6 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         val_loss, val_accuracy, val_output = self.evaluate_model(client_id, round_num)
         
-        # Print results
         print('\n'.join(val_output), flush=True)
         
         return val_loss, len(self.val_loader.dataset), {"val_accuracy": val_accuracy}
@@ -235,7 +210,6 @@ class FlowerClient(fl.client.NumPyClient):
         total_loss = 0.0
         batch_count = 0
         
-        # Buffer for output
         output = []
         
         with torch.no_grad():
@@ -254,7 +228,6 @@ class FlowerClient(fl.client.NumPyClient):
         accuracy = correct / total if total > 0 else 0
         avg_loss = total_loss / batch_count if batch_count > 0 else 0
         
-        # Add validation info
         output.append(f"\n[Client {client_id}] Validation - Accuracy: {accuracy:.4f}, Loss: {avg_loss:.4f}")
         output.append(f"[Client {client_id}] Dataset: {total} samples, {correct} correct")
         
@@ -266,10 +239,8 @@ def main():
     parser.add_argument("--server_address", type=str, default="127.0.0.1:8080", help="Server address")
     args = parser.parse_args()
     
-    # Create client
     client = FlowerClient(client_dir=args.client_dir)
     
-    # Start client
     fl.client.start_numpy_client(
         server_address=args.server_address,
         client=client
