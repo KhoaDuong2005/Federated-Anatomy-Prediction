@@ -1,106 +1,139 @@
-import flwr as fl
-from typing import Dict, List, Tuple
-import argparse
 import os
 import torch
-from collections import OrderedDict
-from model import get_model
+import json
+from flwr.common import Context, ndarrays_to_parameters
+from flwr.server import ServerApp, ServerAppComponents, ServerConfig
+from flwr.server.strategy import FedAvg
+from src.task import Net, get_weights, set_weights, test, NumpyDataset
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from PIL import Image
+import numpy as np
 
-def weighted_average(metrics: List[Tuple[int, Dict]]) -> Dict:
-    if not metrics:
-        return {}
-    
-    metrics_dict = {}
-    for key in metrics[0][1].keys():
-        values = [num_examples * m[key] for num_examples, m in metrics]
-        examples = [num_examples for num_examples, _ in metrics]
-        metrics_dict[key] = sum(values) / sum(examples) if examples else 0
-    return metrics_dict
-
-class Strategy(fl.server.strategy.FedAvg):
-    def __init__(self, save_dir="fl_models", **kwargs):
-        super().__init__(**kwargs)
-        self.save_dir = save_dir
-        os.makedirs(save_dir, exist_ok=True)
+def get_evaluate_fn(testloader, device):
+    def evaluate(server_round, parameters_ndarrays, config):
+        net = Net()
+        set_weights(net, parameters_ndarrays)
+        net.to(device)
         
-        # Create reference model once for consistent structure
-        self.reference_model = get_model()
-
-    def aggregate_fit(self, server_round, results, failures):
-        parameters_aggregated, metrics_aggregated = super().aggregate_fit(
-            server_round, results, failures
-        )
-
-        if parameters_aggregated is not None:
-            # Convert to list of NumPy ndarrays
-            weights_list = fl.common.parameters_to_ndarrays(parameters_aggregated)
+        if testloader is None or len(testloader.dataset) == 0:
+            print(f"WARNING: Test dataset is empty. Skipping evaluation.")
+            return 0.0, {"cen_accuracy": 0.0}
             
-            # Create fresh model with correct architecture
-            model = self.reference_model
-            
-            # Get parameter names from model
-            param_keys = list(model.state_dict().keys())
-            
-            # Create ordered dict directly from names and weights
-            state_dict = OrderedDict()
-            for i, key in enumerate(param_keys):
-                if i < len(weights_list):
-                    # Get the original parameter for reference
-                    orig_param = model.state_dict()[key]
-                    
-                    try:
-                        # Integer buffer handling
-                        if "num_batches_tracked" in key:
-                            value = int(weights_list[i].item())
-                            state_dict[key] = torch.tensor(value, dtype=torch.int64)
-                        else:
-                            # Normal parameter
-                            state_dict[key] = torch.tensor(weights_list[i], dtype=orig_param.dtype)
-                    except:
-                        # Use original parameter if conversion fails
-                        state_dict[key] = orig_param
+        loss, accuracy = test(net, testloader, device)
+        print(f"Round {server_round} centralized evaluation: loss={loss}, accuracy={accuracy}")
+        return float(loss), {"cen_accuracy": float(accuracy)}
+    return evaluate
 
-            # Save model
-            save_path = os.path.join(self.save_dir, f"model_round_{server_round}.pth")
-            torch.save(state_dict, save_path)
-            
-            latest_path = os.path.join(self.save_dir, "latest_model.pth")
-            torch.save(state_dict, latest_path)
+def on_fit_config(server_round: int):
+    lr = 3e-4
+    if server_round > 2:
+        lr = 1e-4
+    return {"lr": lr}
 
-        return parameters_aggregated, metrics_aggregated
+def handle_fit_metrics(metrics):
+    b_values = []
+    for _, m in metrics:
+        if "my_metric" in m:
+            try:
+                my_metric = json.loads(m["my_metric"])
+                if "b" in my_metric:
+                    b_values.append(my_metric["b"])
+            except (json.JSONDecodeError, KeyError):
+                pass
+    return {"max_b": max(b_values)} if b_values else {}
+
+def weighted_average(metrics):
+    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics if "accuracy" in m]
+    total_examples = sum(num_examples for num_examples, _ in metrics)
+    return {"accuracy": sum(accuracies) / total_examples} if total_examples > 0 else {"accuracy": 0.0}
+
+def load_test_images(test_dir, batch_size=32):
+    if not os.path.exists(test_dir):
+        print(f"Test directory not found: {test_dir}")
+        return None
+        
+    class_dirs = [d for d in os.listdir(test_dir) if os.path.isdir(os.path.join(test_dir, d))]
+    if not class_dirs:
+        print(f"No class directories found in {test_dir}")
+        return None
+        
+    print(f"Found {len(class_dirs)} classes: {class_dirs}")
     
-def main():
-    parser = argparse.ArgumentParser(description="Flower server")
-    parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--min_clients", type=int, default=2)
-    parser.add_argument("--save_dir", type=str, default="fl_models")
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--port", type=int, default=8080)
-    args = parser.parse_args()
+    class_to_idx = {cls_name: i for i, cls_name in enumerate(sorted(class_dirs))}
     
-    strategy = Strategy(
-        save_dir=args.save_dir,
-        fraction_fit=1.0,
+    images = []
+    labels = []
+    
+    test_transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    
+    for class_name, idx in class_to_idx.items():
+        class_dir = os.path.join(test_dir, class_name)
+        print(f"Loading {class_name} (idx: {idx}) from {class_dir}")
+        
+        files = [f for f in os.listdir(class_dir) if os.path.isfile(os.path.join(class_dir, f))]
+        print(f"Found {len(files)} images")
+        
+        for file_name in files[:100]:
+            try:
+                img_path = os.path.join(class_dir, file_name)
+                img = Image.open(img_path).convert('RGB')
+                images.append(np.array(img))
+                labels.append(idx)
+            except Exception as e:
+                print(f"Error loading {img_path}: {e}")
+    
+    if not images:
+        print("No images loaded")
+        return None
+        
+    print(f"Loaded {len(images)} test images")
+    
+    test_dataset = NumpyDataset(images, labels, transform=test_transform)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    
+    return test_loader
+
+def server_fn(context: Context):
+    num_rounds = int(context.run_config.get("num-server-rounds", 3))
+    fraction_fit = float(context.run_config.get("fraction-fit", 1.0))
+    
+    num_clients = int(context.run_config.get("num-clients", 3))
+    
+    print(f"Starting server with {num_clients} simulated clients")
+    print(f"Running for {num_rounds} rounds with fraction_fit={fraction_fit}")
+
+    ndarrays = get_weights(Net())
+    parameters = ndarrays_to_parameters(ndarrays)
+
+    data_dir = context.run_config.get("data_dir", "D:/Docs/chest_xray")
+    test_dir = os.path.join(data_dir, "test")
+    
+    print(f"Loading test data from {test_dir}")
+    testloader = load_test_images(test_dir)
+    
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    strategy = FedAvg(
+        fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
-        min_fit_clients=args.min_clients,
-        min_evaluate_clients=args.min_clients,
-        min_available_clients=args.min_clients,
-        on_fit_config_fn=lambda round_num: {
-            "epochs": args.epochs,
-            "round_num": round_num,
-        },
-        on_evaluate_config_fn=lambda round_num: {
-            "round_num": round_num,
-        },
+        min_available_clients=num_clients,
+        min_fit_clients=max(1, int(num_clients * fraction_fit)),
+        min_evaluate_clients=num_clients,
+        initial_parameters=parameters,
         evaluate_metrics_aggregation_fn=weighted_average,
-        fit_metrics_aggregation_fn=weighted_average
+        fit_metrics_aggregation_fn=handle_fit_metrics,
+        on_fit_config_fn=on_fit_config,
+        evaluate_fn=get_evaluate_fn(testloader, device)
     )
     
-    fl.server.start_server(
-        server_address=f"0.0.0.0:{args.port}",
-        config=fl.server.ServerConfig(num_rounds=args.rounds),
-        strategy=strategy,
-    )
+    config = ServerConfig(num_rounds=num_rounds)
+    return ServerAppComponents(strategy=strategy, config=config)
 
-if __name__ == "__main__": 
-    main()
+app = ServerApp(server_fn=server_fn)

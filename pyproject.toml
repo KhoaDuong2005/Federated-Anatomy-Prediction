@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "elton"
+version = "1.0.0"
+description = ""
+license = "Apache-2.0"
+dependencies = [
+    "flwr[simulation]>=1.16.0",
+    "flwr-datasets[vision]>=0.5.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "elton"
+
+[tool.flwr.app.components]
+serverapp = "src.fl_server:app"
+clientapp = "src.fl_client:app"
+
+[tool.flwr.app.config]
+num-server-rounds = 3
+fraction-fit = 0.5
+local-epochs = 5
+data_dir = "D:/Docs/chest_xray"  # Point to the main directory, not the train subdirectory
+num-clients = 3 
+
+[tool.flwr.federations]
+default = "local-simulation"
+
+[tool.flwr.federations.local-simulation]
+options.num-supernodes = 3
+
+[tool.flwr.node_config]
+data_dir = "D:/Docs/chest_xray"  # Keep this consistent with the above

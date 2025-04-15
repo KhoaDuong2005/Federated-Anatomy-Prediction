@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import cv2
 import os
 import pandas as pd
-from typing import List
+from typing import List, Tuple, Dict
 from tqdm import tqdm
+import pickle
 from store_and_retrieve import save_images_to_mongodb
 
 
@@ -14,7 +15,6 @@ def load_medical_image(file_path, size):
         image = sitk.ReadImage(file_path)
         image_array = sitk.GetArrayFromImage(image)
         image_array = np.array(image_array)
-
 
         if image_array.ndim == 3 and image_array.shape[2] <= 4:
             image_array = image_array[:, :, 0]
@@ -28,54 +28,48 @@ def load_medical_image(file_path, size):
     except Exception as exception:
         raise ValueError(f"File not supported, error: {exception}")
 
-def save_images_based_on_config(directory, config, size):
+def load_images_from_folders(directory, size=(224, 224)):
     images = []
     labels = []
-    file_names_list = []
-    folder_path = os.path.join(directory, config["image_folder"])
-
-    if not os.path.exists(folder_path):
-        raise ValueError(f"Directory {folder_path} does not exist")
-
-    try:
-        all_files = []
-        for dir_path, _, file_names in os.walk(folder_path):
-            all_files.extend([(dir_path, file_name) for file_name in file_names])
-
-        label_dict = {}
-        if config["label_format"] == "csv":
-            csv_path = os.path.join(directory, config["label_file_path"])
-            df = pd.read_csv(csv_path)
-            label_dict = dict(zip(df["SeriesInstanceUID"], zip(df["normal"], df["abnormal"]))) #will implment this more for flexibility (not just normal and abnormal)
-
-        for dir_path, file_name in tqdm(all_files, desc="Saving images", unit=" images"): #tqdm for visualizing the progress bar
-            file_path = os.path.join(dir_path, file_name)
-            try:
-                if config["label_format"] == "folder":
-                    is_anatomy = dir_path.endswith("anatomy")
-                elif config["label_format"] == "file":
-                    is_anatomy = os.path.splitext(file_name)[0].endswith("_1")
-                elif config["label_format"] == "csv":
-                    folder_name = os.path.basename(dir_path)
-                    is_anatomy = label_dict.get(folder_name, (0, 0))[1] == 1 #check the tuple for abnormal, and if folder not in the csv, return (0, 0)
-                else:
-                    raise ValueError(f"Invalid label format: {config['label_format']}")
-                
-                image_array = load_medical_image(file_path, size)
-                images.append(image_array)
-                labels.append(is_anatomy)
-                file_names_list.append(file_name)
-
-            except Exception as exception:
-                print(f"Skipping file {file_path}, error: {exception}")
-            
-        return images, file_names_list, labels
-        
-
-    except Exception as exception:
-        print(f"Error when trying to load images based on config: {exception}")
-        return [], [], []
     
+    class_folders = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+    if not class_folders:
+        raise ValueError(f"No class folders found in {directory}")
+    
+    class_to_idx = {cls_name: i for i, cls_name in enumerate(sorted(class_folders))}
+    
+    print(f"Found {len(class_folders)} classes: {class_folders}")
+    print(f"Class mapping: {class_to_idx}")
+    
+    for class_folder in class_folders:
+        class_path = os.path.join(directory, class_folder)
+        class_idx = class_to_idx[class_folder]
+        
+        files = [f for f in os.listdir(class_path) if os.path.isfile(os.path.join(class_path, f))]
+        
+        print(f"Processing class '{class_folder}' ({class_idx}) with {len(files)} images")
+        
+        for file_name in tqdm(files, desc=f"Loading {class_folder}", unit="files"):
+            file_path = os.path.join(class_path, file_name)
+            try:
+                image_array = load_medical_image(file_path, size)
+                
+                images.append(image_array)
+                labels.append(class_idx)
+                
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
+    
+    return images, labels, class_to_idx
+
+def save_images_based_on_config(directory, config, size=(224, 224)):
+    if "image_folder" in config:
+        folder_path = os.path.join(directory, config["image_folder"])
+    else:
+        folder_path = directory
+    
+    images, labels, class_mapping = load_images_from_folders(folder_path, size)
+    return images, labels
 
 def show_image(image_array, modality, body_part):
     image_array = image_array[:, :, 0]
